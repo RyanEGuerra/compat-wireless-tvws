@@ -24,12 +24,14 @@ Note that this has some very specific compatibility requirements due to some sym
 ## Build Instructions
 
 1. To install, cd to the unzipped folder and type:
- - ./scripts/driver-select ath5k
- - make
- - make install
- - make unload
- - modprobe ath5k
-1. To test the installed version of this driver, type “modinfo ath5k” at the prompt. You should see one line that contains “RNG – v12.7″ and some description info.
+
+  * `./scripts/driver-select ath5k`
+  * `make`
+  * `make install`
+  * `make unload`
+  * `modprobe ath5k`
+  
+2. To test the installed version of this driver, type “modinfo ath5k” at the prompt. You should see one line that contains “RNG – v12.7″ and some description info.
 
 ## Support
 Unfortunately, I can NOT offer support for this code.
