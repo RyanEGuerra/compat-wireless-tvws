@@ -1,0 +1,119 @@
+The 2.6.31 kernel has threaded IRQ support and b43 is the first
+wireless driver that makes use of it. To support threaded IRSs
+on older kernels we built our own struct compat_threaded_irq
+to queue_work() onto it as the kernel thread be running the
+thread in process context as well.
+
+--- a/drivers/net/wireless/b43/main.c
++++ b/drivers/net/wireless/b43/main.c
+@@ -3954,8 +3954,13 @@ redo:
+ 	if (dev->dev->bus->bustype == SSB_BUSTYPE_SDIO) {
+ 		b43_sdio_free_irq(dev);
+ 	} else {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
++		compat_synchronize_threaded_irq(&dev->irq_compat);
++		compat_free_threaded_irq(&dev->irq_compat);
++#else
+ 		synchronize_irq(dev->dev->irq);
+ 		free_irq(dev->dev->irq, dev);
++#endif
+ 	}
+ 	mutex_lock(&wl->mutex);
+ 	dev = wl->current_dev;
+@@ -3995,9 +4000,17 @@ static int b43_wireless_core_start(struc
+ 			goto out;
+ 		}
+ 	} else {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
++		err = compat_request_threaded_irq(&dev->irq_compat,
++						  dev->dev->irq,
++						  b43_interrupt_handler,
++						  b43_interrupt_thread_handler,
++						  IRQF_SHARED, KBUILD_MODNAME, dev);
++#else
+ 		err = request_threaded_irq(dev->dev->irq, b43_interrupt_handler,
+ 					   b43_interrupt_thread_handler,
+ 					   IRQF_SHARED, KBUILD_MODNAME, dev);
++#endif
+ 		if (err) {
+ 			b43err(dev->wl, "Cannot request IRQ-%d\n", dev->dev->irq);
+ 			goto out;
+@@ -4726,6 +4739,10 @@ static int b43_setup_bands(struct b43_wl
+ 
+ static void b43_wireless_core_detach(struct b43_wldev *dev)
+ {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
++	if (dev->dev->bus->bustype != SSB_BUSTYPE_SDIO)
++		compat_destroy_threaded_irq(&dev->irq_compat);
++#endif
+ 	/* We release firmware that late to not be required to re-request
+ 	 * is all the time when we reinit the core. */
+ 	b43_release_firmware(dev);
+--- a/drivers/net/wireless/b43/b43.h
++++ b/drivers/net/wireless/b43/b43.h
+@@ -770,6 +770,9 @@ struct b43_wldev {
+ 	unsigned int tx_count;
+ 	unsigned int rx_count;
+ #endif
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
++	struct compat_threaded_irq irq_compat;
++#endif
+ };
+ 
+ /* Data structure for the WLAN parts (802.11 cores) of the b43 chip. */
+--- a/drivers/net/wireless/rt2x00/rt2x00.h
++++ b/drivers/net/wireless/rt2x00/rt2x00.h
+@@ -901,6 +901,10 @@ struct rt2x00_dev {
+ 	 * Tasklet for processing tx status reports (rt2800pci).
+ 	 */
+ 	struct tasklet_struct txstatus_tasklet;
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
++	struct compat_threaded_irq irq_compat;
++#endif
+ };
+ 
+ /*
+--- a/drivers/net/wireless/rt2x00/rt2x00pci.c
++++ b/drivers/net/wireless/rt2x00/rt2x00pci.c
+@@ -160,10 +160,18 @@ int rt2x00pci_initialize(struct rt2x00_d
+ 	/*
+ 	 * Register interrupt handler.
+ 	 */
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
++	status = compat_request_threaded_irq(&rt2x00dev->irq_compat,
++					  rt2x00dev->irq,
++					  rt2x00dev->ops->lib->irq_handler,
++					  rt2x00dev->ops->lib->irq_handler_thread,
++					  IRQF_SHARED, rt2x00dev->name, rt2x00dev);
++#else
+ 	status = request_threaded_irq(rt2x00dev->irq,
+ 				      rt2x00dev->ops->lib->irq_handler,
+ 				      rt2x00dev->ops->lib->irq_handler_thread,
+ 				      IRQF_SHARED, rt2x00dev->name, rt2x00dev);
++#endif
+ 	if (status) {
+ 		ERROR(rt2x00dev, "IRQ %d allocation failed (error %d).\n",
+ 		      rt2x00dev->irq, status);
+@@ -187,7 +195,11 @@ void rt2x00pci_uninitialize(struct rt2x0
+ 	/*
+ 	 * Free irq line.
+ 	 */
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
++	compat_free_threaded_irq(&rt2x00dev->irq_compat);
++#else
+ 	free_irq(rt2x00dev->irq, rt2x00dev);
++#endif
+ 
+ 	/*
+ 	 * Free DMA
+@@ -202,6 +214,9 @@ EXPORT_SYMBOL_GPL(rt2x00pci_uninitialize
+  */
+ static void rt2x00pci_free_reg(struct rt2x00_dev *rt2x00dev)
+ {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
++	compat_destroy_threaded_irq(&rt2x00dev->irq_compat);
++#endif
+ 	kfree(rt2x00dev->rf);
+ 	rt2x00dev->rf = NULL;
+ 
